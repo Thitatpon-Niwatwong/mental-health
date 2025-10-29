@@ -1,17 +1,17 @@
-import { config } from 'dotenv';
-import { z } from 'zod';
+import { config } from "dotenv";
+import { z } from "zod";
 
 config();
 
 const EnvSchema = z.object({
   PORT: z
     .string()
-    .default('3000')
+    .default("3000")
     .transform((value) => Number.parseInt(value, 10))
     .pipe(z.number().int().positive()),
-  COSMOS_DB_ENDPOINT: z.string().min(1, 'COSMOS_DB_ENDPOINT is required'),
-  COSMOS_DB_KEY: z.string().min(1, 'COSMOS_DB_KEY is required'),
-  COSMOS_DB_NAME: z.string().min(1, 'COSMOS_DB_NAME is required'),
+  COSMOS_DB_ENDPOINT: z.string().min(1, "COSMOS_DB_ENDPOINT is required"),
+  COSMOS_DB_KEY: z.string().min(1, "COSMOS_DB_KEY is required"),
+  COSMOS_DB_NAME: z.string().min(1, "COSMOS_DB_NAME is required"),
   // Optional: allow a full Mongo connection URI override
   COSMOS_DB_URI: z.string().min(1).optional(),
 });
