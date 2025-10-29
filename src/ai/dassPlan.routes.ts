@@ -218,15 +218,24 @@ router.post("/dass-21", async (req, res, next) => {
       try {
         const { user } = await signInWithName(userName);
         const total = (depression ?? 0) + (anxiety ?? 0) + (stress ?? 0);
-        await createDassScore({
+        const toSave: {
+          userId: string;
+          userName: string;
+          total: number;
+          createdAt: string;
+          depression?: number;
+          anxiety?: number;
+          stress?: number;
+        } = {
           userId: user.id,
           userName: user.name,
-          depression: depression ?? undefined,
-          anxiety: anxiety ?? undefined,
-          stress: stress ?? undefined,
           total,
           createdAt: new Date().toISOString(),
-        });
+        };
+        if (depression != null) toSave.depression = depression;
+        if (anxiety != null) toSave.anxiety = anxiety;
+        if (stress != null) toSave.stress = stress;
+        await createDassScore(toSave);
       } catch (persistError) {
         // Log and continue; do not fail the response due to persistence errors
         console.error("Failed to persist DASS-21 score", persistError);

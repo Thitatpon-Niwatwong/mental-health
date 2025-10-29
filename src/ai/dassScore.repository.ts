@@ -43,7 +43,16 @@ export const createDassScore = async (
   record: Omit<DassScoreRecord, "id">,
 ): Promise<DassScoreRecord> => {
   const container = await getScoresContainer();
-  const doc: DassScoreRecord = { id: randomUUID(), ...record };
+  const doc: DassScoreRecord = {
+    id: randomUUID(),
+    userId: record.userId,
+    userName: record.userName,
+    total: record.total,
+    createdAt: record.createdAt,
+    ...(record.depression !== undefined ? { depression: record.depression } : {}),
+    ...(record.anxiety !== undefined ? { anxiety: record.anxiety } : {}),
+    ...(record.stress !== undefined ? { stress: record.stress } : {}),
+  };
   await container.items.create(doc);
   const parsed = cosmosScoreSchema.parse(doc);
   return parsed;
