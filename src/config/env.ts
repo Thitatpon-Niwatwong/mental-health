@@ -14,6 +14,7 @@ const EnvSchema = z.object({
   COSMOS_DB_NAME: z.string().min(1, "COSMOS_DB_NAME is required"),
   // Optional: allow a full Mongo connection URI override
   COSMOS_DB_URI: z.string().min(1).optional(),
+  OPENAI_API_KEY: z.string().min(1).optional(),
 });
 
 const parsed = EnvSchema.parse({
@@ -22,6 +23,7 @@ const parsed = EnvSchema.parse({
   COSMOS_DB_KEY: process.env.COSMOS_DB_KEY,
   COSMOS_DB_NAME: process.env.COSMOS_DB_NAME,
   COSMOS_DB_URI: process.env.COSMOS_DB_URI,
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 });
 
 export const env = {
@@ -31,5 +33,8 @@ export const env = {
     key: parsed.COSMOS_DB_KEY,
     dbName: parsed.COSMOS_DB_NAME,
     uri: parsed.COSMOS_DB_URI,
+  },
+  openai: {
+    apiKey: parsed.OPENAI_API_KEY,
   },
 };

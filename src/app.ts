@@ -6,6 +6,7 @@ import morgan from "morgan";
 import { ZodError } from "zod";
 
 import userRoutes from "./users/user.routes.js";
+import plansRoutes from "./ai/dassPlan.routes.js";
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/users", userRoutes);
+app.use("/plans", plansRoutes);
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   void _next; // mark param as used to satisfy lint
