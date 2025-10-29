@@ -43,17 +43,25 @@ export const createDassScore = async (
   record: Omit<DassScoreRecord, "id">,
 ): Promise<DassScoreRecord> => {
   const container = await getScoresContainer();
+  const optionalFields: Partial<Pick<
+    DassScoreRecord,
+    "depression" | "anxiety" | "stress"
+  >> = {};
+  if (record.depression !== undefined) optionalFields.depression = record.depression;
+  if (record.anxiety !== undefined) optionalFields.anxiety = record.anxiety;
+  if (record.stress !== undefined) optionalFields.stress = record.stress;
+
   const doc: DassScoreRecord = {
     id: randomUUID(),
     userId: record.userId,
     userName: record.userName,
     total: record.total,
     createdAt: record.createdAt,
-    ...(record.depression !== undefined ? { depression: record.depression } : {}),
-    ...(record.anxiety !== undefined ? { anxiety: record.anxiety } : {}),
-    ...(record.stress !== undefined ? { stress: record.stress } : {}),
+    ...optionalFields,
   };
   await container.items.create(doc);
-  const parsed = cosmosScoreSchema.parse(doc);
-  return parsed;
+  // Validate shape, but return the strongly-typed doc to avoid
+  // optional `number | undefined` widening under exactOptionalPropertyTypes
+  cosmosScoreSchema.parse(doc);
+  return doc;
 };
