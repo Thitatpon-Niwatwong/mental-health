@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { signInWithName } from "../users/user.service.js";
 import { awardDailyFlame, getStreakForUser } from "./streak.service.js";
+import { getCompletionStreakForUser } from "./completionStreak.service.js";
 
 const router = Router();
 
@@ -66,6 +67,25 @@ router.get("/me", async (req, res, next) => {
     res.status(200).json({
       user: { id: user.id, name: user.name },
       streak: record,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get per-activity completion streak (cumulative count)
+router.get("/completions/me", async (req, res, next) => {
+  try {
+    const userName = resolveUserName(req);
+    if (!userName) {
+      res.status(400).json({ message: "userName is required (x-user-name header)" });
+      return;
+    }
+    const { user } = await signInWithName(userName);
+    const record = await getCompletionStreakForUser(user);
+    res.status(200).json({
+      user: { id: user.id, name: user.name },
+      completionStreak: record,
     });
   } catch (error) {
     next(error);

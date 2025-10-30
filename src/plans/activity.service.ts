@@ -7,6 +7,7 @@ import {
   upsertActivityCompletion,
 } from "./activity.repository.js";
 import { awardDailyFlame } from "../streaks/streak.service.js";
+import { incrementCompletionStreak } from "../streaks/completionStreak.service.js";
 
 const isValidDateKey = (key: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(key);
 
@@ -18,6 +19,7 @@ export type CompleteResult = {
     currentStreak: number;
     lastAwardedDate: string | null;
   };
+  activityStreak?: { totalCompletions: number };
 };
 
 export const markActivityCompleted = async (
@@ -65,6 +67,9 @@ export const markActivityCompleted = async (
 
   const saved = await upsertActivityCompletion(record);
 
+  // Increment per-activity completion streak only when a new completion occurs
+  const activityStreak = await incrementCompletionStreak(user, 1);
+
   const streakRes = await awardDailyFlame(user, { dateKey: date });
 
   return {
@@ -75,6 +80,7 @@ export const markActivityCompleted = async (
       currentStreak: streakRes.currentStreak,
       lastAwardedDate: streakRes.lastAwardedDate,
     },
+    activityStreak: { totalCompletions: activityStreak.totalCompletions },
   };
 };
 
@@ -152,4 +158,3 @@ export const hydratePlanWithCompletions = async (
 
   return { ...asAny, activity_plan: patched };
 };
-
