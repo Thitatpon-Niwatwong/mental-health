@@ -19,7 +19,7 @@ export type CompleteResult = {
     currentStreak: number;
     lastAwardedDate: string | null;
   };
-  activityStreak?: { totalCompletions: number };
+  activityStreak?: { totalCompletions: number; currentStreak: number };
 };
 
 export const markActivityCompleted = async (
@@ -68,7 +68,7 @@ export const markActivityCompleted = async (
   const saved = await upsertActivityCompletion(record);
 
   // Increment per-activity completion streak only when a new completion occurs
-  const activityStreak = await incrementCompletionStreak(user, 1);
+  const activityStreak = await incrementCompletionStreak(user, 1, { dateKey: date });
 
   const streakRes = await awardDailyFlame(user, { dateKey: date });
 
@@ -80,7 +80,10 @@ export const markActivityCompleted = async (
       currentStreak: streakRes.currentStreak,
       lastAwardedDate: streakRes.lastAwardedDate,
     },
-    activityStreak: { totalCompletions: activityStreak.totalCompletions },
+    activityStreak: {
+      totalCompletions: activityStreak.totalCompletions,
+      currentStreak: activityStreak.currentStreak,
+    },
   };
 };
 

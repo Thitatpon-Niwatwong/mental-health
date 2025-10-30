@@ -14,6 +14,7 @@ const cosmosSchema = z.object({
   userId: z.string(),
   userName: z.string(),
   type: z.literal("completion_streak"),
+  currentStreak: z.number().int().nonnegative().default(0),
   totalCompletions: z.number().int().nonnegative(),
   lastIncrementAt: z.string(),
   createdAt: z.string(),
@@ -63,4 +64,3 @@ export const upsertCompletionStreak = async (
     });
   return normalize(resource);
 };
-

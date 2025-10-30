@@ -3,9 +3,9 @@ export type CompletionStreakRecord = {
   userId: string;
   userName: string;
   type: "completion_streak";
+  currentStreak: number;
   totalCompletions: number;
   lastIncrementAt: string; // ISO
   createdAt: string; // ISO
   updatedAt: string; // ISO
 };
-

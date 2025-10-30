@@ -40,7 +40,8 @@ export const findStreakByUserId = async (
 ): Promise<StreakRecord | null> => {
   const container = await getStreaksContainer();
   const querySpec: SqlQuerySpec = {
-    query: "SELECT * FROM c WHERE c.userId = @userId",
+    query:
+      "SELECT TOP 1 * FROM c WHERE c.userId = @userId AND (NOT IS_DEFINED(c.type) OR c.type != 'completion_streak')",
     parameters: [{ name: "@userId", value: userId }],
   };
 
@@ -68,4 +69,3 @@ export const upsertStreak = async (record: StreakRecord): Promise<StreakRecord> 
 
   return normalizeStreak(resource);
 };
-
