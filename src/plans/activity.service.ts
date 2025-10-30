@@ -19,7 +19,7 @@ export type CompleteResult = {
     currentStreak: number;
     lastAwardedDate: string | null;
   };
-  activityStreak?: { totalCompletions: number; currentStreak: number };
+  activityStreak?: { totalCompletions: number };
 };
 
 export const markActivityCompleted = async (
@@ -80,10 +80,7 @@ export const markActivityCompleted = async (
       currentStreak: streakRes.currentStreak,
       lastAwardedDate: streakRes.lastAwardedDate,
     },
-    activityStreak: {
-      totalCompletions: activityStreak.totalCompletions,
-      currentStreak: activityStreak.currentStreak,
-    },
+    activityStreak: { totalCompletions: activityStreak.totalCompletions },
   };
 };
 

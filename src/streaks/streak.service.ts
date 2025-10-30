@@ -1,5 +1,6 @@
 import { findStreakByUserId, upsertStreak } from "./streak.repository.js";
 import type { AwardResult, StreakRecord } from "./streak.types.js";
+import { spendCompletionCredits } from "./completionStreak.service.js";
 
 const toDateKey = (date: Date): string => date.toISOString().slice(0, 10);
 
@@ -99,4 +100,36 @@ export const getStreakForUser = async (
     createdAt: nowIso,
     updatedAt: nowIso,
   };
+};
+
+export const repairDailyStreakWithCompletions = async (
+  user: { id: string; name: string },
+  opts: { dateKey: string },
+): Promise<{ repaired: boolean; spent: number; record: StreakRecord }> => {
+  const targetKey = opts.dateKey;
+  const existing = await findStreakByUserId(user.id);
+  if (!existing || !existing.lastAwardedDate)
+    throw new Error("No eligible streak to repair");
+
+  const last = parseDateKey(existing.lastAwardedDate);
+  const missingKey = toDateKey(addDays(last, 1));
+  const expectedTarget = toDateKey(addDays(last, 2));
+
+  if (expectedTarget !== targetKey)
+    throw new Error("Repair allowed only for exactly one missed day gap");
+
+  // Spend 5 completion credits
+  await spendCompletionCredits(user, 5);
+
+  const nowIso = new Date().toISOString();
+  const updated: StreakRecord = {
+    ...existing,
+    currentStreak: existing.currentStreak + 1,
+    lastAwardedDate: missingKey,
+    updatedAt: nowIso,
+    userName: user.name,
+  };
+
+  const saved = await upsertStreak(updated);
+  return { repaired: true, spent: 5, record: saved };
 };
