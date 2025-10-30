@@ -4,6 +4,14 @@ import { generateDass21Plan } from "./dassPlan.service.js";
 import type { RequestHandler } from "express";
 import { createDassScore } from "./dassScore.repository.js";
 import { signInWithName } from "../users/user.service.js";
+import { createActivityPlan } from "../plans/plan.repository.js";
+import {
+  markActivityCompleted,
+  getActivityStatus,
+  getDayStatus,
+  hydratePlanWithCompletions,
+} from "../plans/activity.service.js";
+import { findLatestPlanByUserId } from "../plans/plan.repository.js";
 
 const router = Router();
 
@@ -213,7 +221,90 @@ router.post("/dass-21", async (req, res, next) => {
     const verified =
       depression != null && anxiety != null && stress != null ? true : false;
 
-    // Persist score if userName is provided
+    const normalizedPlan = (() => {
+      type Normalized = {
+        label: string;
+        DASS_21_scores: { Depression: number | null; Anxiety: number | null; Stress: number | null };
+        "DASS-21_scores"?: never; // prevent accidental use of hyphen key internally
+        activity_plan: unknown[];
+        supportive_neutral_self_talk_examples: string[];
+        warning_signs_and_when_to_seek_professional_help: {
+          warning_signs: string[];
+          when_to_seek_help: string;
+        };
+        note: string;
+      };
+
+      const label = verified ? "[Verified]" : "[Unverified]";
+      const scores = {
+        Depression: depression ?? null,
+        Anxiety: anxiety ?? null,
+        Stress: stress ?? null,
+      } as const;
+
+      const asObj = typeof plan === "object" && plan !== null ? (plan as any) : {};
+
+      const activityPlan: unknown[] = Array.isArray(asObj.activity_plan)
+        ? asObj.activity_plan
+        : [];
+
+      // Normalize supportive self-talk: accept multiple alias keys and string/array forms
+      const selfTalkRaw =
+        asObj.supportive_neutral_self_talk_examples ??
+        asObj.supportive_self_talk_examples ??
+        asObj.supportive_self_talk ??
+        [];
+      const selfTalk: string[] = Array.isArray(selfTalkRaw)
+        ? selfTalkRaw.filter((s: unknown) => typeof s === "string")
+        : typeof selfTalkRaw === "string"
+          ? [selfTalkRaw]
+          : [];
+
+      // Normalize warning fields: support nested object or top-level alias keys
+      const warnObj = asObj.warning_signs_and_when_to_seek_professional_help ?? {
+        warning_signs: asObj.warning_signs,
+        when_to_seek_help: asObj.when_to_seek_help,
+      };
+      const warningSigns: string[] = Array.isArray(warnObj?.warning_signs)
+        ? warnObj.warning_signs.filter((s: unknown) => typeof s === "string")
+        : typeof warnObj?.warning_signs === "string"
+          ? [warnObj.warning_signs]
+          : [];
+      const whenToSeekHelp: string = typeof warnObj?.when_to_seek_help === "string"
+        ? warnObj.when_to_seek_help
+        : "If symptoms persist or worsen, consult a mental health professional.";
+
+      const note: string = typeof asObj.note === "string"
+        ? asObj.note
+        : "This plan does not replace professional care.";
+
+      const normalized: Normalized = {
+        label,
+        // Keep API response key exactly as requested: "DASS-21_scores"
+        // but avoid using hyphenated key internally. We'll map at return.
+        DASS_21_scores: scores,
+        activity_plan: activityPlan,
+        supportive_neutral_self_talk_examples: selfTalk,
+        warning_signs_and_when_to_seek_professional_help: {
+          warning_signs: warningSigns,
+          when_to_seek_help: whenToSeekHelp,
+        },
+        note,
+      };
+
+      // Map to the external shape with key "DASS-21_scores"
+      return {
+        label: normalized.label,
+        ["DASS-21_scores"]: normalized.DASS_21_scores,
+        activity_plan: normalized.activity_plan,
+        supportive_neutral_self_talk_examples: normalized.supportive_neutral_self_talk_examples,
+        warning_signs_and_when_to_seek_professional_help:
+          normalized.warning_signs_and_when_to_seek_professional_help,
+        note: normalized.note,
+      } as const;
+    })();
+
+    // Persist score and plan if userName is provided
     if (userName && userName.length > 0) {
       try {
         const { user } = await signInWithName(userName);
@@ -235,14 +326,205 @@ router.post("/dass-21", async (req, res, next) => {
         if (depression != null) toSave.depression = depression;
         if (anxiety != null) toSave.anxiety = anxiety;
         if (stress != null) toSave.stress = stress;
-        await createDassScore(toSave);
+        try {
+          await createDassScore(toSave);
+          // eslint-disable-next-line no-console
+          console.log("[DASS-21] Saved score", { userId: user.id, total });
+        } catch (scoreErr) {
+          // eslint-disable-next-line no-console
+          console.error("[DASS-21] Failed to persist DASS-21 score", scoreErr);
+        }
+
+        // Save the normalized plan for later display and status management
+        try {
+          const created = await createActivityPlan({
+            userId: user.id,
+            userName: user.name,
+            plan: normalizedPlan,
+            verified,
+            createdAt: new Date().toISOString(),
+          });
+          // eslint-disable-next-line no-console
+          console.log("[DASS-21] Saved activity plan", { id: created.id, userId: user.id });
+        } catch (planErr) {
+          // eslint-disable-next-line no-console
+          console.error("[DASS-21] Failed to persist activity plan", planErr);
+        }
       } catch (persistError) {
         // Log and continue; do not fail the response due to persistence errors
-        console.error("Failed to persist DASS-21 score", persistError);
+        // eslint-disable-next-line no-console
+        console.error("[DASS-21] Persistence block error", persistError);
       }
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn("[DASS-21] Skipping persistence: userName not provided");
     }
 
-    res.status(200).json({ plan, verified });
+    res.status(200).json({ plan: normalizedPlan, verified });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Activity completion endpoints (integrated with streaks)
+const CompleteSchema = z.object({
+  userName: z.string().trim().min(1).max(100).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // YYYY-MM-DD (UTC)
+  slot: z.enum(["Morning", "Afternoon", "Evening"]),
+});
+
+router.post("/activity/complete", async (req, res, next) => {
+  try {
+    const { userName: bodyUserName, date, slot } = CompleteSchema.parse(req.body ?? {});
+    const headerUserName =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string)
+        : undefined;
+    const userName = (bodyUserName ?? headerUserName)?.trim();
+
+    if (!userName) {
+      res.status(400).json({ message: "userName is required (body or x-user-name header)" });
+      return;
+    }
+
+    const { user } = await signInWithName(userName);
+    const result = await markActivityCompleted(user, date, slot);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const StatusSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  slot: z.enum(["Morning", "Afternoon", "Evening"]),
+});
+
+router.get("/activity/status", async (req, res, next) => {
+  try {
+    const headerUserName =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string)
+        : undefined;
+    const queryDate = typeof req.query.date === "string" ? (req.query.date as string) : undefined;
+    const querySlot = typeof req.query.slot === "string" ? (req.query.slot as string) : undefined;
+
+    const parsed = StatusSchema.parse({ date: queryDate, slot: querySlot });
+
+    if (!headerUserName) {
+      res.status(400).json({ message: "userName is required in x-user-name header" });
+      return;
+    }
+
+    const { user } = await signInWithName(headerUserName.trim());
+    const result = await getActivityStatus(user, parsed.date, parsed.slot);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get status for all 3 slots in a day
+router.get("/activity/day-status", async (req, res, next) => {
+  try {
+    const headerUserName =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string)
+        : undefined;
+    const date = typeof req.query.date === "string" ? (req.query.date as string) : undefined;
+    const schema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
+    const { date: parsedDate } = schema.parse({ date });
+
+    if (!headerUserName) {
+      res.status(400).json({ message: "userName is required in x-user-name header" });
+      return;
+    }
+
+    const { user } = await signInWithName(headerUserName.trim());
+    const result = await getDayStatus(user, parsedDate);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Bulk-complete slots for a given day (idempotent per slot)
+router.post("/activity/complete-many", async (req, res, next) => {
+  try {
+    const schema = z.object({
+      userName: z.string().trim().min(1).max(100).optional(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      slots: z.array(z.enum(["Morning", "Afternoon", "Evening"])).min(1),
+    });
+    const { userName: bodyUserName, date, slots } = schema.parse(req.body ?? {});
+    const headerUserName =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string)
+        : undefined;
+    const userName = (bodyUserName ?? headerUserName)?.trim();
+    if (!userName) {
+      res.status(400).json({ message: "userName is required (body or x-user-name header)" });
+      return;
+    }
+
+    const { user } = await signInWithName(userName);
+    const results = [] as Array<Awaited<ReturnType<typeof markActivityCompleted>>>;
+    for (const slot of slots) {
+      // sequential to keep award logic clear; duplicates are idempotent
+      // eslint-disable-next-line no-await-in-loop
+      const r = await markActivityCompleted(user, date, slot);
+      results.push(r);
+    }
+
+    const last = results[results.length - 1];
+    res.status(200).json({ results, streak: last?.streak });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get latest saved plan for user
+router.get("/latest", async (req, res, next) => {
+  try {
+    const headerUserName =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string)
+        : undefined;
+    if (!headerUserName) {
+      res.status(400).json({ message: "userName is required in x-user-name header" });
+      return;
+    }
+    const { user } = await signInWithName(headerUserName.trim());
+    const latest = await findLatestPlanByUserId(user.id);
+    if (!latest) {
+      res.status(404).json({ message: "No plan found" });
+      return;
+    }
+    res.status(200).json(latest);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get latest plan and merge completion statuses for all dates/slots in it
+router.get("/latest/hydrated", async (req, res, next) => {
+  try {
+    const headerUserName =
+      typeof req.headers["x-user-name"] === "string"
+        ? (req.headers["x-user-name"] as string)
+        : undefined;
+    if (!headerUserName) {
+      res.status(400).json({ message: "userName is required in x-user-name header" });
+      return;
+    }
+    const { user } = await signInWithName(headerUserName.trim());
+    const latest = await findLatestPlanByUserId(user.id);
+    if (!latest) {
+      res.status(404).json({ message: "No plan found" });
+      return;
+    }
+    const hydrated = await hydratePlanWithCompletions(user, latest.plan);
+    res.status(200).json({ ...latest, plan: hydrated });
   } catch (error) {
     next(error);
   }

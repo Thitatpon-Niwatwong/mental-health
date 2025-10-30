@@ -29,7 +29,12 @@ export const connectToCosmos = async (): Promise<CosmosConnection> => {
 
 export const getContainer = async (
   containerId: string,
-  options: { partitionKeyPath: string; uniqueKeyPaths?: string[] },
+  options: {
+    partitionKeyPath: string;
+    uniqueKeyPaths?: string[];
+    throughput?: number; // dedicated RU/s for this container
+    autoscaleMaxThroughput?: number; // alternative to throughput
+  },
 ): Promise<Container> => {
   if (containerCache.has(containerId)) {
     return containerCache.get(containerId)!;
@@ -50,8 +55,15 @@ export const getContainer = async (
     request.uniqueKeyPolicy = uniqueKeyPolicy;
   }
 
-  const { container } =
-    await connection.database.containers.createIfNotExists(request);
+  // Configure throughput if provided (prefer autoscale over manual RU)
+  if (options.autoscaleMaxThroughput && options.autoscaleMaxThroughput > 0) {
+    // Use loose cast to support SDK versions where throughput accepts object for autoscale
+    (request as any).throughput = { maxThroughput: options.autoscaleMaxThroughput };
+  } else if (options.throughput && options.throughput > 0) {
+    request.throughput = options.throughput;
+  }
+
+  const { container } = await connection.database.containers.createIfNotExists(request);
 
   containerCache.set(containerId, container);
   return container;
